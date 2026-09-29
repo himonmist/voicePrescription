@@ -1,0 +1,515 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  PLATFORM_ADMIN
+  ORG_ADMIN
+  PROMPT_REVIEWER
+  DOCTOR
+  EDUCATOR
+  RESEARCHER
+  STUDENT
+  USER
+}
+enum Visibility {
+  PRIVATE
+  ORGANIZATION
+  PLATFORM
+}
+enum IntegrationStatus {
+  IN_APP
+  OAUTH_REQUIRED
+  API_KEY_REQUIRED
+  EXTERNAL
+  BETA
+  UNAVAILABLE
+  DISABLED
+}
+enum PublicationStatus {
+  DRAFT
+  IN_REVIEW
+  PUBLISHED
+  ARCHIVED
+}
+enum ExecStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+  BLOCKED
+}
+enum SafetyClass {
+  GENERAL
+  EDUCATIONAL
+  CLINICAL_DRAFT
+}
+
+// ---- Core identity (placeholders; map onto SmartDoctorAid tables when merged) ----
+model User {
+  id String @id @default(cuid())
+  email String @unique
+  name String?
+  role Role @default(USER)
+  orgId String?
+  org Organization? @relation(fields: [orgId], references: [id])
+  createdAt DateTime @default(now())
+  workspaces AIWorkspace[]
+  sessions AISession[]
+  savedPrompts UserSavedPrompt[]
+  collections UserPromptCollection[]
+  documents UploadedDocument[]
+  @@index([orgId])
+}
+model Organization {
+  id String @id @default(cuid())
+  name String
+  allowExternalAI Boolean @default(false)
+  seatLimit Int @default(1)
+  createdAt DateTime @default(now())
+  users User[]
+}
+model Plan {
+  id String @id @default(cuid())
+  code String @unique // FREE PRO PREMIUM CLINIC ENTERPRISE
+  monthlyExecutions Int
+  monthlyCredits Int
+  spendLimitCents Int
+  features Json
+  subscriptions Subscription[]
+}
+model Subscription {
+  id String @id @default(cuid())
+  planId String
+  plan Plan @relation(fields: [planId], references: [id])
+  userId String?
+  orgId String?
+  status String
+  trialEndsAt DateTime?
+  currentPeriodEnd DateTime
+  createdAt DateTime @default(now())
+  @@index([userId])
+  @@index([orgId])
+}
+
+// ---- Providers & tools ----
+model AIProvider {
+  id String @id @default(cuid())
+  key String @unique // openai | anthropic | google | ...
+  name String
+  approvedForPHI Boolean @default(false)
+  enabled Boolean @default(true)
+  lastHealthyAt DateTime?
+  healthDetail String?
+  configs AIProviderConfiguration[]
+  models AIProviderModel[]
+  tools AITool[]
+}
+model AIProviderConfiguration {
+  id String @id @default(cuid())
+  providerId String
+  provider AIProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  secretRef String // NAME of env/secret-manager entry. Never the secret itself.
+  rateLimitPerMin Int @default(60)
+  spendLimitCents Int?
+  rotatedAt DateTime?
+  updatedAt DateTime @updatedAt
+  @@unique([providerId])
+}
+model AIProviderModel {
+  id String @id @default(cuid())
+  providerId String
+  provider AIProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  modelKey String
+  contextTokens Int
+  maxOutputTokens Int
+  inputPer1kUsd Decimal @db.Decimal(12, 6)
+  outputPer1kUsd Decimal @db.Decimal(12, 6)
+  supportsFiles Boolean @default(false)
+  supportsStreaming Boolean @default(false)
+  supportsWebSearch Boolean @default(false)
+  enabled Boolean @default(true)
+  pricingVerifiedAt DateTime?
+  @@unique([providerId, modelKey])
+}
+model AITool {
+  id String @id @default(cuid())
+  slug String @unique
+  name String
+  providerId String?
+  provider AIProvider? @relation(fields: [providerId], references: [id])
+  category String
+  tags String[]
+  description String
+  iconUrl String?
+  websiteUrl String
+  apiDocsUrl String?
+  status IntegrationStatus @default(EXTERNAL)
+  authMethod String?
+  inputTypes String[]
+  outputTypes String[]
+  languages String[]
+  eligiblePlans String[]
+  costMethod String?
+  fileUpload Boolean @default(false)
+  streaming Boolean @default(false)
+  limits Json?
+  lastVerifiedAt DateTime?
+  capabilities AIToolCapability[]
+  statusHistory AIToolIntegrationStatus[]
+  @@index([category])
+  @@index([status])
+}
+model AIToolCapability {
+  id String @id @default(cuid())
+  toolId String
+  tool AITool @relation(fields: [toolId], references: [id], onDelete: Cascade)
+  capability String
+  @@unique([toolId, capability])
+}
+model AIToolIntegrationStatus {
+  id String @id @default(cuid())
+  toolId String
+  tool AITool @relation(fields: [toolId], references: [id], onDelete: Cascade)
+  status IntegrationStatus
+  note String?
+  changedBy String?
+  createdAt DateTime @default(now())
+  @@index([toolId, createdAt])
+}
+
+// ---- Prompt library ----
+model PromptCategory {
+  id String @id @default(cuid())
+  slug String @unique
+  name String
+  group String
+  prompts PromptTemplate[]
+}
+model PromptTemplate {
+  id String @id @default(cuid())
+  title String
+  description String
+  categoryId String
+  category PromptCategory @relation(fields: [categoryId], references: [id])
+  tags String[]
+  audience String[]
+  ownerId String?
+  orgId String?
+  visibility Visibility @default(PRIVATE)
+  status PublicationStatus @default(DRAFT)
+  safetyClass SafetyClass @default(GENERAL)
+  currentVersionId String?
+  featured Boolean @default(false)
+  usageCount Int @default(0)
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+  versions PromptVersion[]
+  variables PromptVariable[]
+  reviews PromptReview[]
+  saved UserSavedPrompt[]
+  collectionItems PromptCollectionItem[]
+  @@index([categoryId])
+  @@index([ownerId])
+  @@index([orgId, visibility])
+  @@index([status])
+}
+model PromptVersion {
+  id String @id @default(cuid())
+  promptId String
+  prompt PromptTemplate @relation(fields: [promptId], references: [id], onDelete: Cascade)
+  version Int
+  body String
+  outputFormat String?
+  recommendedCapabilities String[]
+  compatibleProviders String[]
+  exampleInput Json?
+  exampleOutput String?
+  authorId String
+  createdAt DateTime @default(now())
+  @@unique([promptId, version])
+}
+model PromptVariable {
+  id String @id @default(cuid())
+  promptId String
+  prompt PromptTemplate @relation(fields: [promptId], references: [id], onDelete: Cascade)
+  key String
+  label String
+  type String
+  required Boolean @default(true)
+  options String[]
+  config Json?
+  position Int @default(0)
+  @@unique([promptId, key])
+}
+model PromptReview {
+  id String @id @default(cuid())
+  promptId String
+  prompt PromptTemplate @relation(fields: [promptId], references: [id], onDelete: Cascade)
+  versionId String
+  reviewerId String
+  decision String
+  comment String?
+  createdAt DateTime @default(now())
+  @@index([promptId])
+}
+model UserSavedPrompt {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  promptId String
+  prompt PromptTemplate @relation(fields: [promptId], references: [id], onDelete: Cascade)
+  favorite Boolean @default(true)
+  createdAt DateTime @default(now())
+  @@unique([userId, promptId])
+}
+model UserPromptCollection {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orgId String?
+  name String
+  visibility Visibility @default(PRIVATE)
+  items PromptCollectionItem[]
+  @@index([userId])
+}
+model PromptCollectionItem {
+  id String @id @default(cuid())
+  collectionId String
+  collection UserPromptCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  promptId String
+  prompt PromptTemplate @relation(fields: [promptId], references: [id], onDelete: Cascade)
+  @@unique([collectionId, promptId])
+}
+
+// ---- Workspace / sessions / execution ----
+model AIWorkspace {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orgId String?
+  name String
+  sessions AISession[]
+  @@index([userId])
+}
+model AISession {
+  id String @id @default(cuid())
+  workspaceId String?
+  workspace AIWorkspace? @relation(fields: [workspaceId], references: [id])
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orgId String?
+  title String
+  toolId String?
+  promptId String?
+  archived Boolean @default(false)
+  retainUntil DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  messages AIMessage[]
+  executions AIExecution[]
+  @@index([userId, createdAt])
+  @@index([orgId])
+}
+model AIMessage {
+  id String @id @default(cuid())
+  sessionId String
+  session AISession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  role String
+  content String
+  includedInContext Boolean @default(true)
+  aiGenerated Boolean @default(false)
+  createdAt DateTime @default(now())
+  @@index([sessionId, createdAt])
+}
+model AIExecution {
+  id String @id // client/server generated idempotency id
+  sessionId String
+  session AISession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  userId String
+  orgId String?
+  providerKey String
+  model String
+  status ExecStatus @default(QUEUED)
+  failureCode String?
+  devMode Boolean @default(false)
+  promptId String?
+  promptVersion Int?
+  consentedExternal Boolean @default(false)
+  createdAt DateTime @default(now())
+  finishedAt DateTime?
+  steps AIExecutionStep[]
+  routing AIRoutingDecision?
+  @@index([userId, createdAt])
+  @@index([sessionId])
+}
+model AIExecutionStep {
+  id String @id @default(cuid())
+  executionId String
+  execution AIExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  position Int
+  kind String
+  status ExecStatus
+  retryCount Int @default(0)
+  latencyMs Int?
+  @@unique([executionId, position])
+}
+model AIRoutingDecision {
+  id String @id @default(cuid())
+  executionId String @unique
+  execution AIExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  userId String
+  taskTypes String[]
+  requiredCapabilities String[]
+  selectedToolId String?
+  rejected Json
+  explanation String
+  createdAt DateTime @default(now())
+  @@index([userId])
+}
+
+// ---- Workflows ----
+model AIWorkflowTemplate {
+  id String @id @default(cuid())
+  name String
+  description String
+  ownerId String?
+  orgId String?
+  visibility Visibility @default(PRIVATE)
+  clinical Boolean @default(false)
+  definition Json
+  version Int @default(1)
+  runs AIWorkflowRun[]
+  steps AIWorkflowStep[]
+}
+model AIWorkflowStep {
+  id String @id @default(cuid())
+  templateId String
+  template AIWorkflowTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  key String
+  position Int
+  dependsOn String[]
+  condition Json?
+  requiresApproval Boolean @default(false)
+  config Json
+  @@unique([templateId, key])
+}
+model AIWorkflowRun {
+  id String @id @default(cuid())
+  templateId String
+  template AIWorkflowTemplate @relation(fields: [templateId], references: [id])
+  userId String
+  orgId String?
+  status String
+  state Json
+  estimatedCostCredits Int?
+  createdAt DateTime @default(now())
+  @@index([userId, createdAt])
+}
+
+// ---- Files & knowledge ----
+model UploadedDocument {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orgId String?
+  filename String
+  mimeType String
+  sizeBytes Int
+  sha256 String
+  storageKey String
+  scanStatus String @default("PENDING")
+  extractedText String?
+  retainUntil DateTime?
+  deletedAt DateTime?
+  createdAt DateTime @default(now())
+  collections KnowledgeCollectionDocument[]
+  @@index([userId])
+  @@index([orgId])
+}
+model KnowledgeCollection {
+  id String @id @default(cuid())
+  userId String
+  orgId String?
+  name String
+  visibility Visibility @default(PRIVATE)
+  documents KnowledgeCollectionDocument[]
+  @@index([userId])
+}
+model KnowledgeCollectionDocument {
+  collectionId String
+  collection KnowledgeCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  documentId String
+  document UploadedDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  @@id([collectionId, documentId])
+}
+
+// ---- Usage, credits, budgets, audit (no prompt/response content stored) ----
+model AIUsageRecord {
+  id String @id @default(cuid())
+  executionId String @unique
+  userId String
+  orgId String?
+  providerKey String
+  model String
+  taskCategory String?
+  promptId String?
+  promptVersion Int?
+  status ExecStatus
+  inputTokens Int?
+  outputTokens Int?
+  estimatedCostUsd Decimal? @db.Decimal(12, 6)
+  actualCostUsd Decimal? @db.Decimal(12, 6)
+  credits Int @default(0)
+  latencyMs Int?
+  retryCount Int @default(0)
+  failureCode String?
+  createdAt DateTime @default(now())
+  @@index([userId, createdAt])
+  @@index([orgId, createdAt])
+  @@index([providerKey, createdAt])
+}
+model AICreditTransaction {
+  id String @id @default(cuid())
+  userId String
+  orgId String?
+  kind String // CHARGE | REFUND | GRANT
+  credits Int
+  idempotencyKey String
+  createdAt DateTime @default(now())
+  @@unique([userId, idempotencyKey, kind])
+  @@index([userId, createdAt])
+}
+model ProviderCostRecord {
+  id String @id @default(cuid())
+  providerKey String
+  periodStart DateTime
+  reportedCostUsd Decimal @db.Decimal(14, 6)
+  estimatedCostUsd Decimal @db.Decimal(14, 6)
+  @@unique([providerKey, periodStart])
+}
+model AIBudgetLimit {
+  id String @id @default(cuid())
+  scope String // USER | ORG | PROVIDER | PLATFORM
+  scopeId String
+  monthlyLimitCents Int
+  alertAtPct Int @default(80)
+  @@unique([scope, scopeId])
+}
+model AIAuditEvent {
+  id String @id @default(cuid())
+  type String
+  actorId String
+  orgId String?
+  executionId String?
+  detail Json?
+  createdAt DateTime @default(now())
+  @@index([actorId, createdAt])
+  @@index([orgId, createdAt])
+  @@index([type])
+}
