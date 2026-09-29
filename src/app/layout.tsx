@@ -1,6 +1,7 @@
 import "./globals.css";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { AuthBar } from "@/components/AuthBar";
 
 export const metadata = { title: "SmartDoctorAid – AI Tools Hub", description: "Multi-provider AI workspace, tool routing and prompt library" };
 
@@ -21,6 +22,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
                 <li key={href}><Link href={href} className="block rounded-lg px-3 py-2 text-sm font-medium text-navy-700 hover:bg-brand-soft">{label}</Link></li>
               ))}
             </ul>
+            <AuthBar />
           </nav>
           <main className="flex-1 p-6 md:p-10">{children}</main>
         </div>

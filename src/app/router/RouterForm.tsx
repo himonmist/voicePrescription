@@ -14,7 +14,8 @@ export function RouterForm({ initialTask }: { initialTask: string }) {
     try {
       const r = await fetch("/api/ai/route", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ task }) });
       const j = await r.json();
-      if (!r.ok) setErr(r.status === 401 ? "Please sign in to use the router." : j.error?.message ?? "Request failed");
+      if (r.status === 401) { window.location.href = `/login?next=${encodeURIComponent("/router")}`; return; }
+      if (!r.ok) setErr(j.error?.message ?? "Request failed");
       else setRes(j);
     } catch { setErr("Network error. Try again."); } finally { setBusy(false); }
   }
