@@ -73,3 +73,15 @@ describe("routeTask", () => {
     expect(routeTask(base, c)).toEqual(routeTask(base, c));
   });
 });
+
+describe("external alternatives for multi-part tasks", () => {
+  it("suggests externals covering part of the task, best overlap first", () => {
+    const need = { requiredCapabilities: ["document_analysis", "research", "presentation"], needsWebSearch: false, hasPatientData: false, plan: "FREE", estTokens: 100 };
+    const r = routeTask(need, [
+      mk({ id: "gamma", status: "EXTERNAL", capabilities: ["presentation"] }),
+      mk({ id: "nlm", status: "EXTERNAL", capabilities: ["document_analysis", "research"] }),
+      mk({ id: "irrelevant", status: "EXTERNAL", capabilities: ["coding"] }),
+    ]);
+    expect(r.externalAlternatives.map((c) => c.id)).toEqual(["nlm", "gamma"]);
+  });
+});

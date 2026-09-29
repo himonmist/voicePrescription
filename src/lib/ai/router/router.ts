@@ -49,7 +49,7 @@ export function routeTask(input: RouteInput, candidates: Candidate[]): RouteResu
     if (c.status === "DISABLED") { rejected.push({ id: c.id, reason: "Disabled by administrator" }); continue; }
     if (c.status === "EXTERNAL") {
       rejected.push({ id: c.id, reason: "External application – cannot run in-app" });
-      if (input.requiredCapabilities.every((r) => c.capabilities.includes(r))) externalAlternatives.push(c);
+      if (input.requiredCapabilities.some((r) => c.capabilities.includes(r))) externalAlternatives.push(c);
       continue;
     }
     if (c.status === "UNAVAILABLE" || !c.healthy) { rejected.push({ id: c.id, reason: "Provider unavailable (health check failing)" }); continue; }
@@ -61,6 +61,8 @@ export function routeTask(input: RouteInput, candidates: Candidate[]): RouteResu
     if (c.contextTokens < input.estTokens) { rejected.push({ id: c.id, reason: "Context window too small" }); continue; }
     eligible.push(c);
   }
+  const overlap = (c: Candidate) => input.requiredCapabilities.filter((r) => c.capabilities.includes(r)).length;
+  externalAlternatives.sort((a, b) => overlap(b) - overlap(a) || a.id.localeCompare(b.id));
   eligible.sort((a, b) => a.id.localeCompare(b.id)); // stable, deterministic base order
 
   if (eligible.length === 0) {

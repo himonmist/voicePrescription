@@ -1,10 +1,11 @@
 import type { ZodType } from "zod";
 import type { Actor, Role } from "@/lib/ai/security/authz";
 import { verifySession } from "@/lib/auth/session";
+import { ConfigError } from "./errors";
 import type { RateLimiter } from "@/lib/security/ratelimit";
 
 export interface HandlerOpts<T> {
-  secret: string; limiter: RateLimiter; schema?: ZodType<T>; roles?: Role[]; maxBytes?: number;
+  secret: string | (() => string); limiter: RateLimiter; schema?: ZodType<T>; roles?: Role[]; maxBytes?: number;
 }
 export interface Ctx<T> { actor: Actor; body: T; req: Request }
 
@@ -27,7 +28,7 @@ export function handle<T = undefined>(o: HandlerOpts<T>, fn: (c: Ctx<T>) => Prom
         if (!origin || origin !== new URL(req.url).origin) return err(403, "CSRF_BLOCKED", "Cross-origin request rejected");
       }
       const tok = cookieValue(req, "sda_session");
-      const actor = tok ? verifySession(tok, o.secret) : null;
+      const actor = tok ? verifySession(tok, typeof o.secret === "function" ? o.secret() : o.secret) : null;
       if (!actor) return err(401, "UNAUTHENTICATED", "Sign in required");
       if (o.roles && !o.roles.includes(actor.role)) return err(403, "FORBIDDEN", "You do not have permission");
       const rl = o.limiter.take(`${actor.userId}:${new URL(req.url).pathname}`);
@@ -47,7 +48,9 @@ export function handle<T = undefined>(o: HandlerOpts<T>, fn: (c: Ctx<T>) => Prom
       const h = new Headers(res.headers);
       for (const [k, v] of Object.entries(headers)) h.set(k, v);
       return new Response(res.body, { status: res.status, headers: h });
-    } catch {
+    } catch (e) {
+      if (e instanceof ConfigError) return err(503, "SERVICE_NOT_CONFIGURED", e.message);
+      console.error("[api] unhandled error:", e instanceof Error ? e.name : "unknown"); // name only: messages may embed sensitive values
       return err(500, "INTERNAL_ERROR", "Something went wrong");
     }
   };

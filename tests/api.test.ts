@@ -57,3 +57,11 @@ describe("handle()", () => {
     expect(r.headers.get("cache-control")).toBe("no-store");
   });
 });
+
+import { ConfigError } from "@/lib/api/errors";
+describe("handle() config errors", () => {
+  it("maps ConfigError to 503 with its safe message", async () => {
+    const r = await handle(opts(), async () => { throw new ConfigError("Database is not configured"); })(mkReq({ cookie: cookie(), body: { n: 1 } }));
+    expect(r.status).toBe(503); expect((await r.json()).error.message).toBe("Database is not configured");
+  });
+});
